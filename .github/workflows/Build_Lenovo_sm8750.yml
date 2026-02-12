@@ -352,7 +352,7 @@ jobs:
           echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=y" >> ./common/arch/arm64/configs/gki_defconfig
           printf '%s\n' 'KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%-Re-TG@qdykernel"' >>  ./common/arch/arm64/configs/gki_defconfig
           
-          if [ "${{ env.ENABLE_KPM }} " = "true" ]; then
+          if [ "${{ env.ENABLE_KPM }} " == "true" ]; then
             echo "CONFIG_KPM=y" >> ./common/arch/arm64/configs/gki_defconfig
           else
             echo "CONFIG_KPM=n" >> ./common/arch/arm64/configs/gki_defconfig
