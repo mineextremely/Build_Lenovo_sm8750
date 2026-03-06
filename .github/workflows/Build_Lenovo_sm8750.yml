@@ -238,7 +238,7 @@ jobs:
               done
               [ -z "$KSU_API_VERSION" ] && KSU_API_VERSION="4.1.0"
               echo "KSU_API_VERSION=$KSU_API_VERSION" >> $GITHUB_ENV
-              VERSION_DEFINITIONS=$'define get_ksu_version_full\nv\\$1-'"$GIT_COMMIT_HASH"$'-TG@qdykernel\nendef\n\nKSU_VERSION_API := '"$KSU_API_VERSION"$'\nKSU_VERSION_FULL := v'"$KSU_API_VERSION"$'-'"$GIT_COMMIT_HASH"$'-TG@qdykernel'
+              VERSION_DEFINITIONS=$'define get_ksu_version_full\nv\\$1-'"$GIT_COMMIT_HASH"$'-Github@mineextremely\nendef\n\nKSU_VERSION_API := '"$KSU_API_VERSION"$'\nKSU_VERSION_FULL := v'"$KSU_API_VERSION"$'-'"$GIT_COMMIT_HASH"$'-Github@mineextremely'
               
               sed -i '/define get_ksu_version_full/,/endef/d' kernel/Kbuild
               sed -i '/KSU_VERSION_API :=/d' kernel/Kbuild
@@ -253,7 +253,7 @@ jobs:
               echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
               grep -A10 "REPO_OWNER" kernel/Kbuild
               grep "KSU_VERSION_FULL" kernel/Kbuild
-              echo "SukiSU版本号: v${KSU_API_VERSION}-${GIT_COMMIT_HASH}-TG@qdykernel"
+              echo "SukiSU版本号: v${KSU_API_VERSION}-${GIT_COMMIT_HASH}-Github@mineextremely"
             fi
 
       - name: 🔧 Set up SUSFS (配置 SUSFS)
