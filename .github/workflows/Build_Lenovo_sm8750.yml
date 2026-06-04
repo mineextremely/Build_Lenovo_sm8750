@@ -478,7 +478,7 @@ jobs:
         working-directory: kernel_workspace/common
         run: |
           echo "==> 开始应用 Droidspaces SYSVIPC kABI 修复补丁..."
-          KABI_PATCH="${GITHUB_WORKSPACE}/patch/GKI-6.6-sysvipc_kabi_3_4_5.patch"
+          KABI_PATCH="${GITHUB_WORKSPACE}/.github/workflows/tools/GKI-6.6-sysvipc_kabi_3_4_5.patch"
           if [ ! -f "$KABI_PATCH" ]; then
             echo "::error::未找到 Droidspaces SYSVIPC kABI 补丁: $KABI_PATCH"
             exit 1
