@@ -559,7 +559,7 @@ jobs:
           echo "CONFIG_KSU=y" >> "$DEFCONFIG"
           echo "CONFIG_KPM=y" >> "$DEFCONFIG"
 
-          echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%-Re-TG@qdykernel"' >> "$DEFCONFIG"
+          echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%-GitHub@mineextremely"' >> "$DEFCONFIG"
 
           # ==================== SUSFS 配置 ====================
           if [ "${{ env.ENABLE_SUSFS }}" == 'true' ];then
