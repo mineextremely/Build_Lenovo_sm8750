@@ -1,4 +1,4 @@
-name: Build_All_Lenovo_sm8750
+name: Build_Lenovo_sm8750
 permissions:
   contents: read
   actions: write
@@ -143,7 +143,7 @@ jobs:
               6.6.102)
                 KERNEL_TIME='Tue Dec 9 15:43:22 UTC 2025'
                 ;;
-              6.6.102)
+              6.6.118)
                 KERNEL_TIME='Thu Feb 26 02:40:50 UTC 2026'
                 ;;
             esac
@@ -369,32 +369,34 @@ jobs:
       - name: 🔧 Add Re-Kernel Support (添加 Re-Kernel 支持)
         if: ${{ env.ENABLE_REKERNEL == 'true' }}
         run: |
-          cd kernel_workspace
-          VERSION=$(awk -F'=' '/^VERSION[ \t]*=/ {gsub(/ /,"",$2); print $2}' common/Makefile)
-          PATCHLEVEL=$(awk -F'=' '/^PATCHLEVEL[ \t]*=/ {gsub(/ /,"",$2); print $2}' common/Makefile)
-          echo "VERSION=$VERSION"
-          echo "PATCHLEVEL=$PATCHLEVEL"
-          git clone https://github.com/Sakion-Team/Re-Kernel.git
-          RE_DIR="${GITHUB_WORKSPACE}/kernel_workspace/Re-Kernel/LKM-Source"
-          cd common
-          sed -i '/endmenu/i source "drivers/rekernel/Kconfig"' drivers/Kconfig
-          sed -i '$a \#Re-Kernel Support\nobj-$(CONFIG_REKERNEL) += rekernel/' drivers/Makefile
-          mkdir -p drivers/rekernel
-          cp ${RE_DIR}/* drivers/rekernel/
-          TARGET="KERNEL_${VERSION}_${PATCHLEVEL}"
-          if grep -q "$TARGET" drivers/rekernel/rekernel.h; then
-            sed -i "s|^[[:space:]]*//[[:space:]]*#define[[:space:]]\+$TARGET|#define $TARGET|" drivers/rekernel/rekernel.h
-            echo "CONFIG_REKERNEL=m" >> arch/arm64/configs/gki_defconfig
-            echo "CONFIG_REKERNEL_NETWORK=y" >> arch/arm64/configs/gki_defconfig
-          else
-            echo "⚠️ $TARGET not found in rekernel.h"
-          fi
+            cd kernel_workspace
+            VERSION=$(awk -F'=' '/^VERSION[ \t]*=/ {gsub(/ /,"",$2); print $2}' common/Makefile)
+            PATCHLEVEL=$(awk -F'=' '/^PATCHLEVEL[ \t]*=/ {gsub(/ /,"",$2); print $2}' common/Makefile)
+            echo "内核版本: ${VERSION}.${PATCHLEVEL}"
+            [ ! -d "Re-Kernel" ] && git clone --depth 1 https://github.com/Sakion-Team/Re-Kernel.git
+            RE_DIR="${GITHUB_WORKSPACE}/kernel_workspace/Re-Kernel/LKM-Source"
+            cd common
+            grep -q 'source "drivers/rekernel/Kconfig"' drivers/Kconfig || \
+              sed -i '/endmenu/i source "drivers/rekernel/Kconfig"' drivers/Kconfig
+            grep -q 'obj-$(CONFIG_REKERNEL)' drivers/Makefile || \
+              printf '\n# Re-Kernel\nobj-$(CONFIG_REKERNEL) += rekernel/\n' >> drivers/Makefile
+            mkdir -p drivers/rekernel
+            cp ${RE_DIR}/* drivers/rekernel/
+            TARGET="KERNEL_${VERSION}_${PATCHLEVEL}"
+            if grep -q "$TARGET" drivers/rekernel/rekernel.h; then
+              sed -i "s|^[[:space:]]*//[[:space:]]*#define[[:space:]]\+$TARGET|#define $TARGET|" drivers/rekernel/rekernel.h
+              echo "CONFIG_REKERNEL=m" >> arch/arm64/configs/gki_defconfig
+              echo "CONFIG_REKERNEL_NETWORK=y" >> arch/arm64/configs/gki_defconfig
+              echo "✅ Re-Kernel 配置完成"
+            else
+              echo "⚠️ 不支持的内核版本: $TARGET"
+            fi
 
       - name: 🔧 Add adios_ioscheduler (添加 adios_ioscheduler)
         working-directory: kernel_workspace/common
         run: |
           echo "开始添加 ADIOS I/O 调度器支持..."
-          PATCH_FILE="${GITHUB_WORKSPACE}/.github/workflows/tools/adios_ioscheduler.patch"
+          PATCH_FILE="${GITHUB_WORKSPACE}/patch/adios_ioscheduler.patch"
           if [ ! -f "$PATCH_FILE" ]; then
             echo "::error::未找到 ADIOS I/O 调度器补丁文件"
             exit 1
@@ -443,15 +445,15 @@ jobs:
           sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./common/security/Kconfig
 
       
-      - name: ⚙️ Set ReSukiSU (设置 ReSukiSU)
+      - name: ⚙️ Set ReSukiSU (设置ReSukiSU)
         run: |
-            cd kernel_workspace
-            echo "正在配置ReSukiSU..."
-            curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s dev
-            cd ./KernelSU 
-            KSU_VERSION=$(expr $(git rev-list --count dev) + 30700 2>/dev/null || echo 114514)
-            echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-            echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
+          cd kernel_workspace
+          echo "正在配置ReSukiSU..."
+          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s dev
+          cd ./KernelSU 
+          KSU_VERSION=$(expr $(git rev-list --count origin/dev 2>/dev/null) + 30700 2>/dev/null || echo 114514)
+          echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+          echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
 
       - name: 🔧 Set up SUSFS (配置 SUSFS)
         if: ${{ env.ENABLE_SUSFS == 'true' }}
@@ -487,6 +489,25 @@ jobs:
             echo "::warning::SYSVIPC kABI 补丁应用失败，可能已应用或上下文不匹配"
           fi
           echo "==> Droidspaces SYSVIPC kABI 修复完成"
+
+      - name: 🔧 Apply ntsync Patch (应用 ntsync 补丁)
+        if: ${{ env.ENABLE_DROIDSPACES == 'true' }}
+        working-directory: kernel_workspace/common
+        run: |
+          echo "==> 开始应用 ntsync 补丁..."
+          for PATCH_NAME in "ntsync_base.patch" "ntsync_compat_6.6.patch"; do
+            PATCH_PATH="${GITHUB_WORKSPACE}/patch/${PATCH_NAME}"
+            if [ ! -f "$PATCH_PATH" ]; then
+              echo "::error::未找到 ntsync 补丁: $PATCH_PATH"
+              exit 1
+            fi
+            echo "  应用: $PATCH_NAME"
+            dos2unix "$PATCH_PATH"
+            if ! git apply --ignore-whitespace "$PATCH_PATH"; then
+              echo "::warning::补丁 $PATCH_NAME 应用失败，可能已应用或上下文不匹配"
+            fi
+          done
+          echo "==> ntsync 补丁应用完成"
 
       - name: 🔧 Set gki_defconfig (设置编译配置)
         run: |
@@ -551,6 +572,7 @@ jobs:
             enable_config_if_defined CONFIG_NETFILTER_XT_TARGET_REJECT
             enable_config_if_defined CONFIG_IP_NF_TARGET_REJECT
             disable_config CONFIG_ANDROID_PARANOID_NETWORK
+            echo "CONFIG_NTSYNC=y" >> "$DEFCONFIG"
 
             echo "==> Droidspaces 内核配置完成"
           fi
