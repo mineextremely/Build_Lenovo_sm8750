@@ -5,7 +5,7 @@
 [![GitHub](https://img.shields.io/badge/-GitHub|@qdykernel-181717?logo=github&logoColor=white&style=flat-square)](https://github.com/qdykernel/Build_Lenovo_sm8750)
 [![Telegram](https://img.shields.io/badge/Telegram-频道-blue.svg?logo=telegram)](https://t.me/qdykernel)
 [![酷安|主页](https://img.shields.io/badge/酷安|主页-3DDC84?style=flat-square&logo=android&logoColor=white)](http://www.coolapk.com/u/1624571)
-[![Workflow Status](https://img.shields.io/github/actions/workflow/status/qdykernel/Build_Lenovo_sm8750/build.yml?label=Build&logo=github-actions&style=flat-square)](https://github.com/qdykernel/Build_Lenovo_sm8750/actions)
+[![Workflow Status](https://img.shields.io/github/actions/workflow/status/mineextremely/Build_Lenovo_sm8750/Build_Lenovo_sm8750.yml?label=Build&logo=github-actions&style=flat-square)](https://github.com/mineextremely/Build_Lenovo_sm8750/actions)
 <br>
 
 ---
@@ -17,10 +17,10 @@
 ### ✨ 主要特性
 
 - 🚀 **全自动化编译** - 基于 GitHub Actions，无需本地环境
-- 🔧 **多种 KSU 支持** - ReSukiSU / SukiSU-Ultra 可选
+- 🔧 **ReSukiSU 集成** - 可开关的 ReSukiSU (KernelSU) 注入，联动 SUSFS / KPM
 - ⚡ **性能优化** - 集成ADIOS I/O调度补丁
 - 💾 **ccache 缓存** - 智能缓存管理，首次编译使用公共缓存提速 50%，二次编译提速 80%
-- 📦 **开箱即用** - 自动生成 AnyKernel3 刷入包
+- 📦 **开箱即用** - 自动重打包 boot.img 并使用 AOSP 测试密钥签名
 
 ---
 
@@ -46,9 +46,8 @@
 
 | 工作流 | 说明 | 适用场景 |
 |--------|------|----------|
-| [build.yml](.github/workflows/build.yml) | 完整内核编译（含 KSU/SUSFS 等） | 集成KSU获取ROOT |
-| [clean-caches.yml](.github/workflows/clean-caches.yml) | 清理 ccache 缓存 | 缓存异常或需要重新编译时 |
-| [clear_workflows.yml](.github/workflows/clear_workflows.yml) | 清理工作流运行记录 | 保证Action界面整洁
+| [Build_Lenovo_sm8750.yml](.github/workflows/Build_Lenovo_sm8750.yml) | 完整内核编译（含 KSU / SUSFS / ADIOS / Droidspaces 等） | 编译并集成所需功能 |
+| [Clear_All_Workflow.yml](.github/workflows/Clear_All_Workflow.yml) | 清理工作流运行记录 | 保证 Actions 界面整洁 |
 
 ---
 
@@ -58,10 +57,19 @@
 
 在工作流运行时，您可以配置以下参数：
 
-- **kernel_version**: 选择要编译的内核版本
-- **KSU Type**: 选择 KernelSU 类型 (ReSukiSU / SukiSU-Ultra)
-- **Enable SUSFS**: 是否启用 SUSFS 支持
-- **Custom Flags**: 添加额外的编译标志
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `kernel_version` | 选项 | `6.6.89` | 内核版本：`6.6.56` / `6.6.89` / `6.6.102` / `6.6.118` |
+| `custom_kernel_suffix` | 文本 | 空 | 自定义内核名称，留空则使用官方内核名 |
+| `custom_kernel_time` | 文本 | 空 | 自定义构建时间，留空则使用官方内核时间 |
+| `enable_ReSukiSU` | 布尔 | `true` | 启用 ReSukiSU (KernelSU) 注入；**关闭后 SUSFS / KPM 同步失效** |
+| `enable_susfs` | 布尔 | `true` | 启用 SUSFS（依赖 ReSukiSU） |
+| `enable_kpm` | 布尔 | `true` | 启用 KPM（依赖 ReSukiSU） |
+| `enable_ReKernel` | 布尔 | `true` | 集成 Re-Kernel，并额外产出 Re-Kernel 模块压缩包 |
+| `enable_Adios` | 布尔 | `true` | 启用 ADIOS I/O 调度器 |
+| `enable_droidspaces` | 布尔 | `false` | Droidspaces 支持（含 SYSVIPC kABI 修复与 ntsync 驱动） |
+| `enable_bbg` | 布尔 | `false` | 开启 BBG 基带守护 |
+| `enable_signed` | 布尔 | `true` | 使用 AOSP 测试密钥签名 boot |
 
 #### 使用公共缓存
 
@@ -69,7 +77,18 @@
 
 #### 清理旧缓存
 
-当构建时间超过 8 分钟时，会自动清理旧的 ccache 缓存，避免占用过多 GitHub 存储空间。也可手动运行 [clean-caches](.github/workflows/clean-caches.yml) 工作流清理全部缓存。
+当构建耗时超过 8 分钟时，工作流会在保存新缓存后自动删除同机型同变体的旧缓存，避免占用过多 GitHub 存储空间。缓存按内核版本分桶，启用 Droidspaces 时使用独立的 `-ds` 变体，不同功能组合的缓存不会互相污染。
+
+### 内核补丁
+
+`patch/` 目录存放本仓库自行维护的内核补丁，构建时在源码下载完成后自动应用：
+
+| 补丁 | 作用 | 应用条件 |
+|------|------|----------|
+| `adios_ioscheduler.patch` | ADIOS 自适应 I/O 调度器 | `enable_Adios` |
+| `GKI-6.6-sysvipc_kabi_3_4_5.patch` | 修复 SYSVIPC 结构体破坏 GKI kABI 的问题 | `enable_droidspaces` |
+| `ntsync_base.patch` | NT 同步原语驱动 `ntsync` | `enable_droidspaces` |
+| `ntsync_compat_6.6.patch` | 将 `ntsync` 接入 6.6 的 Kconfig / Makefile | `enable_droidspaces` |
 
 ---
 
@@ -113,7 +132,7 @@
 
 ### 相关项目
 
-- [OnePlus/Realme 内核编译](https://github.com/qdykernel/Build_Oneplus_Realme_Actionl)
+- [OnePlus/Realme 内核编译](https://github.com/qdykernel/Build_Oneplus_Realme_Action)
 - [SukiSU-Ultra 项目](https://github.com/SukiSU-Ultra/SukiSU-Ultra)
 - [ReSukiSU 项目](https://github.com/ReSukiSU/ReSukiSU)
 

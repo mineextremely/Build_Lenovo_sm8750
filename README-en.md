@@ -5,7 +5,7 @@
 [![GitHub](https://img.shields.io/badge/-GitHub|@qdykernel-181717?logo=github&logoColor=white&style=flat-square)](https://github.com/qdykernel/Build_Lenovo_sm8750)
 [![Telegram](https://img.shields.io/badge/Telegram-Channel-blue.svg?logo=telegram)](https://t.me/qdykernel)
 [![CoolApk|Profile](https://img.shields.io/badge/CoolApk%7CProfile-3DDC84?style=flat-square&logo=android&logoColor=white)](http://www.coolapk.com/u/1624571)
-[![Workflow Status](https://img.shields.io/github/actions/workflow/status/qdykernel/Build_Lenovo_sm8750/build.yml?label=Build&logo=github-actions&style=flat-square)](https://github.com/qdykernel/Build_Lenovo_sm8750/actions)
+[![Workflow Status](https://img.shields.io/github/actions/workflow/status/mineextremely/Build_Lenovo_sm8750/Build_Lenovo_sm8750.yml?label=Build&logo=github-actions&style=flat-square)](https://github.com/mineextremely/Build_Lenovo_sm8750/actions)
 <br>
 
 ---
@@ -17,10 +17,10 @@ This project provides an automated kernel compilation workflow based on **GitHub
 ### ✨ Key Features
 
 - 🚀 **Fully Automated Compilation** - Based on GitHub Actions, no local environment required
-- 🔧 **Multiple KSU Support** - ReSukiSU / SukiSU-Ultra options available
+- 🔧 **ReSukiSU Integration** - Toggleable ReSukiSU (KernelSU) injection, linked with SUSFS / KPM
 - ⚡ **Performance Optimization** - Integrated ADIOS I/Oscheduler patch
 - 💾 **ccache Caching** - Intelligent cache management, 50% speed boost for first compilation with public cache, 80% for subsequent compilations
-- 📦 **Ready to Use** - Automatically generates AnyKernel3 flashable packages
+- 📦 **Ready to Use** - Automatically repacks boot.img and signs it with the AOSP test key
 
 ---
 
@@ -46,9 +46,8 @@ Click the **Fork** button in the upper right corner of the repository to copy th
 
 | Workflow | Description | Use Case |
 |----------|-------------|----------|
-| [build.yml](.github/workflows/build.yml) | Full kernel compilation (including KSU/SUSFS, etc.) | Integrate KSU to obtain ROOT |
-| [clean-caches.yml](.github/workflows/clean-caches.yml) | Clean ccache cache | When cache is abnormal or recompilation is needed |
-| [clear_workflows.yml](.github/workflows/clear_workflows.yml) | Clear workflow run records | Keep Action interface clean |
+| [Build_Lenovo_sm8750.yml](.github/workflows/Build_Lenovo_sm8750.yml) | Full kernel compilation (KSU / SUSFS / ADIOS / Droidspaces, etc.) | Compile and integrate the features you need |
+| [Clear_All_Workflow.yml](.github/workflows/Clear_All_Workflow.yml) | Clear workflow run records | Keep the Actions page tidy |
 
 ---
 
@@ -58,10 +57,19 @@ Click the **Fork** button in the upper right corner of the repository to copy th
 
 During workflow execution, you can configure the following parameters:
 
-- **kernel_version**: Select the kernel version to compile
-- **KSU Type**: Choose KernelSU type (ReSukiSU / SukiSU-Ultra)
-- **Enable SUSFS**: Whether to enable SUSFS support
-- **Custom Flags**: Add additional compilation flags
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `kernel_version` | choice | `6.6.89` | Kernel version: `6.6.56` / `6.6.89` / `6.6.102` / `6.6.118` |
+| `custom_kernel_suffix` | string | empty | Custom kernel name; empty uses the official one |
+| `custom_kernel_time` | string | empty | Custom build time; empty uses the official one |
+| `enable_ReSukiSU` | boolean | `true` | Enable ReSukiSU (KernelSU) injection; **disabling it also disables SUSFS / KPM** |
+| `enable_susfs` | boolean | `true` | Enable SUSFS (requires ReSukiSU) |
+| `enable_kpm` | boolean | `true` | Enable KPM (requires ReSukiSU) |
+| `enable_ReKernel` | boolean | `true` | Integrate Re-Kernel and additionally publish a Re-Kernel module zip |
+| `enable_Adios` | boolean | `true` | Enable the ADIOS I/O scheduler |
+| `enable_droidspaces` | boolean | `false` | Droidspaces support (includes the SYSVIPC kABI fix and the ntsync driver) |
+| `enable_bbg` | boolean | `false` | Enable the BBG baseband guard |
+| `enable_signed` | boolean | `true` | Sign boot with the AOSP test key |
 
 #### Using Public Cache
 
@@ -69,7 +77,18 @@ The project will automatically download pre-compiled cache from the public cache
 
 #### Cleaning Old Cache
 
-When build time exceeds 8 minutes, old ccache cache will be automatically cleaned to avoid occupying too much GitHub storage space. You can also manually run the [clean-caches](.github/workflows/clean-caches.yml) workflow to clean all caches.
+When a build takes longer than 8 minutes, the workflow saves the new cache and then deletes old caches for the same device and variant, avoiding excessive GitHub storage usage. Caches are bucketed by kernel version, and enabling Droidspaces uses a separate `-ds` variant so different feature combinations never pollute each other.
+
+### Kernel Patches
+
+The `patch/` directory holds the kernel patches maintained by this repository. They are applied automatically once the source tree has been downloaded:
+
+| Patch | Purpose | Applied when |
+|-------|---------|--------------|
+| `adios_ioscheduler.patch` | ADIOS adaptive I/O scheduler | `enable_Adios` |
+| `GKI-6.6-sysvipc_kabi_3_4_5.patch` | Fix SYSVIPC structs breaking the GKI kABI | `enable_droidspaces` |
+| `ntsync_base.patch` | NT synchronization primitive driver `ntsync` | `enable_droidspaces` |
+| `ntsync_compat_6.6.patch` | Wire `ntsync` into the 6.6 Kconfig / Makefile | `enable_droidspaces` |
 
 ---
 
