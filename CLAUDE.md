@@ -114,6 +114,8 @@ actionlint .github/workflows/*.yml                             # Actions 语义�
 
 **上游必需项 —— 全部已覆盖**：`CONFIG_SYSVIPC`、`CONFIG_POSIX_MQUEUE`、`CONFIG_IPC_NS`、`CONFIG_PID_NS`、`CONFIG_DEVTMPFS`、`CONFIG_NETFILTER_XT_MATCH_ADDRTYPE`
 
+> **注意隐式依赖**：`init/Kconfig` 里 `config IPC_NS` 是 `depends on (SYSVIPC || POSIX_MQUEUE)`（而 `config USER_NS` 无任何 `depends`）。所以 `CONFIG_SYSVIPC` 与 `CONFIG_POSIX_MQUEUE` **至少要留一个**——两个都关掉时 `IPC_NS` 会被 Kconfig 静默解析回 `n`，构建不报任何错。这三项须同进同退。
+
 **上游「可选但推荐」—— 已覆盖**：`CONFIG_NETFILTER_XT_TARGET_REJECT`、`CONFIG_NETFILTER_XT_TARGET_LOG`、`CONFIG_NETFILTER_XT_MATCH_RECENT`、`CONFIG_IP_SET` / `_HASH_IP` / `_HASH_NET`、`CONFIG_NETFILTER_XT_SET`。`CONFIG_TMPFS_POSIX_ACL` / `CONFIG_TMPFS_XATTR` 也有，但写在 Droidspaces 块**之外**、无条件生效。
 
 **上游「可选但推荐」—— 已补齐**：
@@ -139,7 +141,7 @@ actionlint .github/workflows/*.yml                             # Actions 语义�
 
 - **`name:` 字段是查找键。** `Clear_All_Workflow.yml` 用 `gh api ... select(.name == "...")` 按显示名定位工作流，并且清理自身时硬编码了 `"清理工作流运行记录"`。改任一工作流的 `name:` 会让清理工具失准。
 - **判断开关是否真的接入，看 `ENABLE_*` 的出现次数。** 定义行之外还有引用才算生效。`enable_Adios` 曾经是个失效开关（`ENABLE_ADIOS` 只有定义、没有消费点），已于 2026-09-13 给该步骤补上 `if:` 门控。
-- **defconfig 一律用 `>>` 追加**，不做去重。因为每次运行都重新解压 `common.tar.gz`，不存在累积问题——但别把这个模式搬到有持久状态的场景。
+- **读写 defconfig 必须同时识别 Kconfig 的两种写法**：已启用是 `CONFIG_X=y`，已禁用是 `# CONFIG_X is not set`（**不是** `CONFIG_X=n`）。`enable_config` 与 `disable_config` 都需两种都认，漏掉注释形式就会给已存在的项**重复追加**一行。基线 `gki_defconfig` 中绝大多数选项根本不出现，只有 `CONFIG_PID_NS` 这类是显式注释形式，所以这条很容易被漏测。重复行不跨运行累积（每次重新解压 `common.tar.gz`），但同一次运行内就会产生。
 - **`repo 变量`可覆盖上游来源**：`BOOT_SIGNER_REPO`、`BOOT_SIGNER_REF`、`PUBLIC_CACHE_REPO`、`PUBLIC_CACHE_TAG` 优先读 `vars.*`，未设置时回退到工作流内默认值（`showdo/*`）。fork 后想换源应改 repository variables，而不是改工作流。
 - **fork 标识被写进内核**：`CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%-GitHub@mineextremely"`。这是 fork 者的水印，非上游原值。
 - **README 已于 2026-09-13 与实现对齐**：工作流表格、输入参数表、`patch/` 目录说明、状态徽章均已修正（此前它引用的 `build.yml`、`clean-caches.yml`、`clear_workflows.yml` 三个文件并不存在）。**改工作流文件名或增删输入时需同步两份 README 的表格。** README 中的 Telegram / 酷安 / GitHub 徽章仍指向上游 `qdykernel/`——那是刻意保留的出处标注，不要"顺手统一"成本仓库。
