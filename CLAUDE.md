@@ -116,9 +116,11 @@ actionlint .github/workflows/*.yml                             # Actions 语义�
 
 **上游「可选但推荐」—— 已覆盖**：`CONFIG_NETFILTER_XT_TARGET_REJECT`、`CONFIG_NETFILTER_XT_TARGET_LOG`、`CONFIG_NETFILTER_XT_MATCH_RECENT`、`CONFIG_IP_SET` / `_HASH_IP` / `_HASH_NET`、`CONFIG_NETFILTER_XT_SET`。`CONFIG_TMPFS_POSIX_ACL` / `CONFIG_TMPFS_XATTR` 也有，但写在 Droidspaces 块**之外**、无条件生效。
 
-**上游「可选但推荐」—— 缺失**：
+**上游「可选但推荐」—— 已补齐**：
 
-- `CONFIG_USER_NS` —— 上游标注为 *"Fix for docker unsafe procfs error"*。缺它时容器内再跑 Docker 会撞上 procfs 报错。**这是本仓库相对上游清单唯一未覆盖的项。**
+- `CONFIG_USER_NS` —— 上游标注为 *"Fix for docker unsafe procfs error"*。缺它时容器内再跑 Docker 会撞上 procfs 报错。**dev 分支已补上**（`enable_config_if_defined CONFIG_USER_NS`），这是本仓库相对上游清单原先唯一未覆盖的项。
+
+  已实测核实（基于 `2025-06.tar.gz` = 6.6.89 的源码）：基线 `gki_defconfig` 中**没有**该项；`init/Kconfig` 定义了 `config USER_NS` 且**无 `depends on` 约束**，所以写入 defconfig 会真正生效。注意该选项内核默认 `n`，Android GKI 亦有意保持关闭——启用它会扩大内核攻击面（user namespace 历来是本地提权漏洞的高发区），这是为换取嵌套容器能力所做的**有意取舍**。
 
 **本仓库额外启用的（上游 GKI 清单之外）**：
 

@@ -593,6 +593,11 @@ jobs:
             enable_config_if_defined CONFIG_NETFILTER_XT_SET
             enable_config_if_defined CONFIG_NETFILTER_XT_TARGET_REJECT
             enable_config_if_defined CONFIG_IP_NF_TARGET_REJECT
+
+            # ---- 嵌套容器 / Docker 支持 (上游标注: 修复 docker unsafe procfs 错误) ----
+            # 基线 gki_defconfig 中无此项; init/Kconfig 已定义 USER_NS 且无 depends 约束,
+            # 故此处会真正写入 CONFIG_USER_NS=y。注意: 该选项内核默认 n, 启用会扩大攻击面。
+            enable_config_if_defined CONFIG_USER_NS
             disable_config CONFIG_ANDROID_PARANOID_NETWORK
             echo "CONFIG_NTSYNC=y" >> "$DEFCONFIG"
 
