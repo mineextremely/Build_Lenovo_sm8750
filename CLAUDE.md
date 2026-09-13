@@ -98,6 +98,41 @@ actionlint .github/workflows/*.yml                             # Actions 语义�
 
 **时间劫持**是这套缓存能生效的前提，也是最容易让人困惑的一环：构建阶段用 `libfakestat.so` + `libfaketimeMT.so` 通过 `LD_PRELOAD` 介入 `cc-wrapper`/`ld-wrapper`，把编译器看到的文件时间戳和当前时间**固定**在 `2025-05-25`，同时 `KBUILD_BUILD_TIMESTAMP` 取自版本矩阵里的 `KERNEL_TIME`。所以在构建日志里，`date` 和 `stat` 的输出是假的——这是设计，不是故障，调缓存命中率时尤其要记住。
 
+## Droidspaces 支持：手工同步，无版本绑定
+
+`enable_droidspaces` 只做**内核侧准备**——产出的是"支持 Droidspaces 的内核"，**不是**注入了 Droidspaces 的内核。Droidspaces 本体是运行在设备上的用户态程序（[ravindu644/Droidspaces-OSS](https://github.com/ravindu644/Droidspaces-OSS)，Kotlin 编写），需在设备上另行安装。
+
+**本仓库与 Droidspaces-OSS 没有任何代码耦合**：不拉取、不引用、不校验。补丁与配置清单是照上游文档手工复刻的，此后两边各自演化。核对时以上游 `Documentation/Kernel-Configuration.md` 的 **"Configuring GKI Kernels"** 章节为准。
+
+该开关实际只做三件事：
+
+1. 应用 `patch/GKI-6.6-sysvipc_kabi_3_4_5.patch`——对应上游的 `3_4_5` **备选**变体（上游推荐 `6_7_8`，并注明"若导致 bootloop 就改用 `1_2_3` 或 `3_4_5`"）
+2. 应用 `patch/ntsync_base.patch` + `patch/ntsync_compat_6.6.patch`——**上游 Droidspaces 文档中根本没有 ntsync**，这是本仓库额外添加的（NT 同步原语，服务于 Wine/Proton 类场景）
+3. 在 `Set gki_defconfig` 步骤写入内核配置（见下）
+
+### 配置项与上游 GKI 清单的差异
+
+**上游必需项 —— 全部已覆盖**：`CONFIG_SYSVIPC`、`CONFIG_POSIX_MQUEUE`、`CONFIG_IPC_NS`、`CONFIG_PID_NS`、`CONFIG_DEVTMPFS`、`CONFIG_NETFILTER_XT_MATCH_ADDRTYPE`
+
+**上游「可选但推荐」—— 已覆盖**：`CONFIG_NETFILTER_XT_TARGET_REJECT`、`CONFIG_NETFILTER_XT_TARGET_LOG`、`CONFIG_NETFILTER_XT_MATCH_RECENT`、`CONFIG_IP_SET` / `_HASH_IP` / `_HASH_NET`、`CONFIG_NETFILTER_XT_SET`。`CONFIG_TMPFS_POSIX_ACL` / `CONFIG_TMPFS_XATTR` 也有，但写在 Droidspaces 块**之外**、无条件生效。
+
+**上游「可选但推荐」—— 缺失**：
+
+- `CONFIG_USER_NS` —— 上游标注为 *"Fix for docker unsafe procfs error"*。缺它时容器内再跑 Docker 会撞上 procfs 报错。**这是本仓库相对上游清单唯一未覆盖的项。**
+
+**本仓库额外启用的（上游 GKI 清单之外）**：
+
+- `CONFIG_IP_NF_TARGET_REJECT` —— 来自上游的「可选·防火墙」清单（UFW/Fail2ban）
+- 禁用 `CONFIG_ANDROID_PARANOID_NETWORK` —— 来自上游的**非 GKI** 清单，上游注释是 "Disable this on **older kernels** to make internet work"，用在 6.6 上属于越界借用
+- `CONFIG_NTSYNC=y` —— 上游 Droidspaces 文档中完全没有
+
+### 两条必须记住的
+
+1. **内核要求是手工同步的，没有绑定任何 Droidspaces 版本。** 上游新增依赖、改名或调整推荐项时，本仓库不会自动跟上，也**不会报错**——只会安静地构建出一个缺项的内核，由你在设备上撞到问题。定期对照上游文档是唯一的防线。
+2. **真正的验收手段只有上游 App 自带的检查器**：设备上 **Settings → Requirements → Check Requirements**，或终端 `su -c droidspaces check`。逐项比对配置清单只能证明"照着文档抄齐了"，不能证明"内核真的够用"。
+
+另外，上游对 GKI 的警告原文是 **"DO NOT enable anything other than the recommended GKI configuration"**；但 kABI 真正敏感的只有 `SYSVIPC` / `IPC_NS` / `POSIX_MQUEUE`（它们会移动 `task_struct` 偏移量），而这三项正是 kABI 补丁所覆盖的。
+
 ## 改动时的注意事项
 
 - **`name:` 字段是查找键。** `Clear_All_Workflow.yml` 用 `gh api ... select(.name == "...")` 按显示名定位工作流，并且清理自身时硬编码了 `"清理工作流运行记录"`。改任一工作流的 `name:` 会让清理工具失准。
