@@ -33,11 +33,26 @@ on:
         type: boolean
 
       enable_ReKernel:
-        description: "启用Re-Kernel支持"
+        # 原 Re-Kernel 描述：启用Re-Kernel支持（说明见本输入末尾的占位块）
         required: false
         default: true
         type: boolean
+
+        
+        # 以下为旧键位回收后的说明块（由自动化脚本维护）
+        description: |
+          description: "启用 ReSukiSU (KernelSU) 注入；关闭后 SUSFS/KPM 自动失效"
+          required: false
+          default: true
+          type: boolean
       
+      enable_ReSukiSU:
+          description: "启用 ReSukiSU (KernelSU) 注入；关闭后 SUSFS/KPM 自动失效"
+          required: false
+          default: true
+          type: boolean
+
+                  # 恢复 ADIOS 输入键（缩进交由脚本对齐）
       enable_Adios:
         description: "启用ADIOS IO调度器支持"
         required: true
@@ -80,6 +95,12 @@ jobs:
       CUSTOM_KERNEL_SUFFIX: ${{ github.event.inputs.custom_kernel_suffix }}
       CUSTOM_KERNEL_TIME: ${{ github.event.inputs.custom_kernel_time }}
       ENABLE_REKERNEL: ${{ github.event.inputs.enable_ReKernel }}
+        
+      ENABLE_RESUKISU: ${{ github.event.inputs.enable_ReSukiSU }}
+        
+      BOOT_SIGNER_REPO: ${{ vars.BOOT_SIGNER_REPO || 'showdo/AOSP-Testkey-BootSigner' }}
+        
+      BOOT_SIGNER_REF: ${{ vars.BOOT_SIGNER_REF || 'main' }}
       ENABLE_ADIOS: ${{ github.event.inputs.enable_Adios }}
       ENABLE_DROIDSPACES: ${{ github.event.inputs.enable_droidspaces }}
       ENABLE_BBG: ${{ github.event.inputs.enable_bbg }}
@@ -204,6 +225,7 @@ jobs:
           echo "CCACHE_DIR=$HOME/.ccache_${{ env.KERNEL_VERSION }}" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
           # 根据影响源码的功能开关生成缓存变体后缀，避免不同变体互相污染
+          # 变体仅用于隔离不同功能组合的配置差异；ccache 本身按内容哈希，不会错误复用产物
           CACHE_VARIANT=""
           if [ "${{ env.ENABLE_DROIDSPACES }}" = "true" ]; then
             CACHE_VARIANT="${CACHE_VARIANT}-ds"
@@ -449,14 +471,25 @@ jobs:
         run: |
           cd kernel_workspace
           echo "正在配置ReSukiSU..."
-          curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s dev
+                    set -euo pipefail
+          if [ "${ENABLE_RESUKISU}" != "true" ]; then
+            echo "未启用 ReSukiSU：跳过 KSU 注入，SUSFS/KPM 将同步失效"
+            {
+              echo "KSUVER=none"
+              echo "KSU_NAME=NoKSU"
+            } >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "KSU_NAME=ReSukiSU" >> "$GITHUB_ENV"
+          # -f 保证脚本 404 时直接失败，而不是把 HTML 错误页喂给 bash
+          curl -fLSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s dev
           cd ./KernelSU 
           KSU_VERSION=$(expr $(git rev-list --count origin/dev 2>/dev/null) + 30700 2>/dev/null || echo 114514)
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
 
       - name: 🔧 Set up SUSFS (配置 SUSFS)
-        if: ${{ env.ENABLE_SUSFS == 'true' }}
+        if: ${{ env.ENABLE_RESUKISU == 'true' && env.ENABLE_SUSFS == 'true' }}
         run: |
           cd kernel_workspace
           git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-android15-6.6
@@ -577,14 +610,24 @@ jobs:
             echo "==> Droidspaces 内核配置完成"
           fi
 
-          # ==================== KSU 配置 ====================
+                      # ==================== KSU / ReSukiSU 配置 ====================
+            # ReSukiSU 未启用时不写入任何 CONFIG_KSU_*，避免产生指向不存在 Kconfig 的悬空配置
+            if [ "${ENABLE_RESUKISU}" == "true" ]; then
           echo "CONFIG_KSU=y" >> "$DEFCONFIG"
-          echo "CONFIG_KPM=y" >> "$DEFCONFIG"
+                        if [ "${ENABLE_KPM}" == "true" ]; then
+                echo "CONFIG_KPM=y" >> "$DEFCONFIG"
+              else
+                echo "未启用 KPM，跳过 CONFIG_KPM"
+              fi
 
           echo 'CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%-GitHub@mineextremely"' >> "$DEFCONFIG"
+            fi
+            if [ "${ENABLE_RESUKISU}" != "true" ]; then
+              echo "未启用 ReSukiSU，跳过 CONFIG_KSU / CONFIG_KPM"
+            fi
 
           # ==================== SUSFS 配置 ====================
-          if [ "${{ env.ENABLE_SUSFS }}" == 'true' ];then
+          if [ "${{ env.ENABLE_RESUKISU }}" == "true" ] && [ "${{ env.ENABLE_SUSFS }}" == 'true' ]; then
             echo "CONFIG_KSU_SUSFS=y" >> "$DEFCONFIG"
             echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> "$DEFCONFIG"
             echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> "$DEFCONFIG"
@@ -601,7 +644,11 @@ jobs:
             echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> "$DEFCONFIG"
             echo "CONFIG_KSU_SUSFS_SUS_MAP=y" >> "$DEFCONFIG"
           else
-            echo "未启用SUSFS 跳过SUSFS配置"
+                        if [ "${ENABLE_RESUKISU}" != "true" ]; then
+              echo "未启用 ReSukiSU：SUSFS 依赖 ReSukiSU，跳过全部 CONFIG_KSU_SUSFS_*"
+            else
+              echo "未启用 SUSFS，跳过 SUSFS 配置"
+            fi
           fi
           
           echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -775,7 +822,7 @@ jobs:
             core.info(`旧缓存清理完成，共删除 ${deleted} 个缓存`);
 
       - name: 📦 Apply KPM and patch the kernel (应用KPM并修补内核)
-        if: ${{ env.ENABLE_KPM == 'true' }}
+        if: ${{ env.ENABLE_RESUKISU == 'true' && env.ENABLE_KPM == 'true' }}
         run: |
           echo "正在应用KPM并修补内核..."
           cd kernel_workspace/common/out/arch/arm64/boot
@@ -800,18 +847,50 @@ jobs:
         if: ${{ env.ENABLE_SIGNED == 'true' }}
         run: |
           cd kernel_workspace
-          aria2c -s16 -x16 -k1M "https://github.com/showdo/AOSP-Testkey-BootSigner/archive/refs/heads/main.tar.gz" -o boot_avb_tool.tar.gz && \
+          # ---- AOSP 签名器：严格错误处理 + 可覆盖的签名器来源；不依赖 ReSukiSU ----
+          set -euo pipefail
+          : "${BOOT_SIGNER_REPO:=showdo/AOSP-Testkey-BootSigner}"
+          : "${BOOT_SIGNER_REF:=main}"
+          echo "==> 使用签名器 ${BOOT_SIGNER_REPO}@${BOOT_SIGNER_REF}"
+          rm -rf boot_avb_tool
+          aria2c -s16 -x16 -k1M -m 3 --retry-wait=2 --console-log-level=warn \
+            "https://github.com/${BOOT_SIGNER_REPO}/archive/${BOOT_SIGNER_REF}.tar.gz" -o boot_avb_tool.tar.gz && \
           mkdir -p boot_avb_tool && \
           tar -xzf boot_avb_tool.tar.gz -C boot_avb_tool && \
+            EXTRACTED_DIR="$(find boot_avb_tool -maxdepth 1 -mindepth 1 -type d -print -quit)" && \
+            if [ -n "$EXTRACTED_DIR" ] && [ "$EXTRACTED_DIR" != "boot_avb_tool/AOSP-Testkey-BootSigner-main" ]; then mv "$EXTRACTED_DIR" boot_avb_tool/AOSP-Testkey-BootSigner-main; fi && \
           rm -f boot_avb_tool.tar.gz && \
-          cp ./common/out/arch/arm64/boot/Image ./boot_avb_tool/AOSP-Testkey-BootSigner-main/kernel
+                      test -s ./common/out/arch/arm64/boot/Image || { echo "::error::未找到内核镜像 ./common/out/arch/arm64/boot/Image"; exit 1; }
+            cp -f ./common/out/arch/arm64/boot/Image ./boot_avb_tool/AOSP-Testkey-BootSigner-main/kernel
           cd boot_avb_tool/AOSP-Testkey-BootSigner-main && \
+            echo "==> 预检官方 boot.img (${releases}) 是否可下载" && \
+            curl -fIL --retry 3 --retry-delay 2 --retry-connrefused -o /dev/null "https://github.com/${BOOT_SIGNER_REPO}/releases/download/${releases}/boot.img" && \
           curl -L -o boot.img https://github.com/showdo/AOSP-Testkey-BootSigner/releases/download/${{ env.releases }}/boot.img
           chmod +x ./tools/magiskboot
           ./tools/magiskboot repack boot.img
+            test -s ./new-boot.img || { echo "::error::magiskboot 重打包失败，未生成 new-boot.img"; exit 1; }
           rm -f ./boot.img kernel
           mv ./new-boot.img ./boot.img
-          python3 rebuild_avb.py --chained-mode
+            BOOT_SIZE=$(stat -c%s ./boot.img)
+            echo "==> 待签名镜像就绪: $(pwd)/boot.img (${BOOT_SIZE} bytes)"
+          if [ -f requirements.txt ]; then python3 -m pip install --quiet --disable-pip-version-check -r requirements.txt || echo "::warning::签名依赖安装失败，继续尝试签名"; fi
+            python3 rebuild_avb.py --chained-mode
+            test -s ./boot.img || { echo "::error::签名后未生成 boot.img"; exit 1; }
+            BOOT_SIZE=$(stat -c%s ./boot.img)
+            echo "==> AOSP 签名完成: $(pwd)/boot.img (${BOOT_SIZE} bytes)"
+            if command -v avbtool >/dev/null 2>&1; then
+              avbtool verify_image --image ./boot.img || echo "::warning::avbtool 校验未通过（链式签名下可能属预期）"
+            fi
+            {
+              echo "### ✅ AOSP Signed boot"
+              echo ""
+              echo "| 项 | 值 |"
+              echo "| --- | --- |"
+              echo "| boot.img | \`$(pwd)/boot.img\` |"
+              echo "| 大小 | ${BOOT_SIZE} bytes |"
+              echo "| 签名器 | ${BOOT_SIGNER_REPO}@${BOOT_SIGNER_REF} |"
+              echo "| boot 版本 | ${releases} |"
+            } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 📤 Upload Signed boot (上传已签名的 boot)
         if: ${{ env.ENABLE_SIGNED == 'true' }}
