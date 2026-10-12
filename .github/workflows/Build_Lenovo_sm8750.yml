@@ -94,6 +94,10 @@ jobs:
       ENABLE_BAKASU: ${{ github.event.inputs.enable_BakaSU }}
       BOOT_SIGNER_REPO: ${{ vars.BOOT_SIGNER_REPO || 'showdo/AOSP-Testkey-BootSigner' }}
       BOOT_SIGNER_REF: ${{ vars.BOOT_SIGNER_REF || 'main' }}
+      # 待签名源 boot.img 的来源（与签名器工具来源分开，二者可各自指定）
+      # TAG 留空则回退到本版本矩阵里的 releases
+      BOOT_IMG_REPO: ${{ vars.BOOT_IMG_REPO || 'showdo/AOSP-Testkey-BootSigner' }}
+      BOOT_IMG_TAG: ${{ vars.BOOT_IMG_TAG || '' }}
       ENABLE_ADIOS: ${{ github.event.inputs.enable_Adios }}
       ENABLE_DROIDSPACES: ${{ github.event.inputs.enable_droidspaces }}
       ENABLE_DROIDSPACES_NTSYNC: ${{ github.event.inputs.enable_droidspaces_ntsync }}
@@ -123,6 +127,9 @@ jobs:
             "6.6.118")
               echo "os_patch_level=2026-01" >> $GITHUB_ENV
               echo "releases=TB322_ZUXOS_1.5.10.183" >> $GITHUB_ENV
+              # 该版本签名改用自有 release 上传的 boot.img（tag 与 releases 无关，独立指定）
+              echo "BOOT_IMG_REPO=mineextremely/Build_Lenovo_sm8750" >> $GITHUB_ENV
+              echo "BOOT_IMG_TAG=TB322_ZUXOS_1.5.10.251" >> $GITHUB_ENV
               ;;
           esac
            if [ -z "${{ env.CUSTOM_KERNEL_SUFFIX }}" ]; then
@@ -868,7 +875,11 @@ jobs:
           set -euo pipefail
           : "${BOOT_SIGNER_REPO:=showdo/AOSP-Testkey-BootSigner}"
           : "${BOOT_SIGNER_REF:=main}"
+          # 源 boot.img 来源：默认与签名器同仓库，tag 回退到本版本 releases
+          BOOT_IMG_REPO="${BOOT_IMG_REPO:-$BOOT_SIGNER_REPO}"
+          BOOT_IMG_TAG="${BOOT_IMG_TAG:-$releases}"
           echo "==> 使用签名器 ${BOOT_SIGNER_REPO}@${BOOT_SIGNER_REF}"
+          echo "==> 源 boot.img 取自 ${BOOT_IMG_REPO}@${BOOT_IMG_TAG}"
           rm -rf boot_avb_tool
           aria2c -s16 -x16 -k1M -m 3 --retry-wait=2 --console-log-level=warn \
             "https://github.com/${BOOT_SIGNER_REPO}/archive/${BOOT_SIGNER_REF}.tar.gz" -o boot_avb_tool.tar.gz && \
@@ -880,9 +891,9 @@ jobs:
                       test -s ./common/out/arch/arm64/boot/Image || { echo "::error::未找到内核镜像 ./common/out/arch/arm64/boot/Image"; exit 1; }
             cp -f ./common/out/arch/arm64/boot/Image ./boot_avb_tool/AOSP-Testkey-BootSigner-main/kernel
           cd boot_avb_tool/AOSP-Testkey-BootSigner-main && \
-            echo "==> 预检官方 boot.img (${releases}) 是否可下载" && \
-            curl -fIL --retry 3 --retry-delay 2 --retry-connrefused -o /dev/null "https://github.com/${BOOT_SIGNER_REPO}/releases/download/${releases}/boot.img" && \
-          curl -L -o boot.img https://github.com/showdo/AOSP-Testkey-BootSigner/releases/download/${{ env.releases }}/boot.img
+            echo "==> 预检源 boot.img (${BOOT_IMG_REPO}@${BOOT_IMG_TAG}) 是否可下载" && \
+            curl -fIL --retry 3 --retry-delay 2 --retry-connrefused -o /dev/null "https://github.com/${BOOT_IMG_REPO}/releases/download/${BOOT_IMG_TAG}/boot.img" && \
+            curl -fL --retry 3 --retry-delay 2 --retry-connrefused -o boot.img "https://github.com/${BOOT_IMG_REPO}/releases/download/${BOOT_IMG_TAG}/boot.img"
           chmod +x ./tools/magiskboot
           ./tools/magiskboot repack boot.img
             test -s ./new-boot.img || { echo "::error::magiskboot 重打包失败，未生成 new-boot.img"; exit 1; }
@@ -906,7 +917,7 @@ jobs:
               echo "| boot.img | \`$(pwd)/boot.img\` |"
               echo "| 大小 | ${BOOT_SIZE} bytes |"
               echo "| 签名器 | ${BOOT_SIGNER_REPO}@${BOOT_SIGNER_REF} |"
-              echo "| boot 版本 | ${releases} |"
+              echo "| 源 boot.img | ${BOOT_IMG_REPO}@${BOOT_IMG_TAG} |"
             } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 📤 Upload Signed boot (上传已签名的 boot)
