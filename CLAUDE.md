@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 因此：**没有本地构建、没有测试、没有 lint。** 唯一的验证手段是推送后触发 Actions 并读日志。
 
 ```
-.github/workflows/Build_Lenovo_sm8750.yml   # 主构建（1020 行，全部逻辑都在这个文件里）
+.github/workflows/Build_Lenovo_sm8750.yml   # 主构建（千行量级，全部逻辑都在这个文件里）
 .github/workflows/Clear_All_Workflow.yml    # 清理 Actions 运行记录
 patch/                                      # 仅 adios_ioscheduler.patch，按绝对路径引用
 ```
@@ -53,7 +53,7 @@ actionlint .github/workflows/*.yml                             # Actions 语义�
 
 如果这两个工具都装不上，**至少做两件事**：把每个 `run:` 块抽出来逐个 `bash -n`（能抓到解合并冲突留下的悬空 `fi`——这类错误 YAML 层面完全合法），以及 grep 一遍残留的冲突标记。再顺手校验一遍：`github.event.inputs.*` 都有声明、`env.*` 引用都有定义、引用的 `patch/*.patch` 在磁盘上存在。
 
-产物（Artifacts）：`kernel_image_<version>`、`Boot_<KSUVER>_<version>_<KSU_NAME>_AOSP_Signed`（`enable_signed` 时）、`Re-Kernel-v<version>`（`enable_ReKernel` 时）。`KSU_NAME` 是 `BakaSU`，或关闭 KSU 注入时的 `NoKSU`。
+产物（Artifacts）：`kernel_image_<version>`、`Boot_<KSUVER>_<version>_<KSU_NAME>_AOSP_Signed`（`enable_signed` 时）、`Re-Kernel-v<version>`（`enable_ReKernel` 时）。`KSU_NAME` 是 `BakaSU`，或关闭 KSU 注入时的 `NoKSU`；`KSUVER` 取自 `git rev-list --count origin/main + 30700`（取不到时回退 `114514`），关闭注入时为 `none`——**即产物名依赖 BakaSU 仓库的提交数**，因此这个数字会随上游提交漂移，不能当成固定版本号写进文档或做断言（历史上曾因算式的分支名不存在而整体回退成 `114514`，见 `53316bd`）。
 
 **本仓库不产出 AnyKernel3 刷入包**，只产出上述原始 `Image`、重打包签名后的 `boot.img` 和 Re-Kernel 模块。
 
@@ -72,6 +72,8 @@ actionlint .github/workflows/*.yml                             # Actions 语义�
 `enable_droidspaces_ntsync` 是 `enable_droidspaces` 的从属开关，只有 Droidspaces 不为 `off` 时才可能生效。
 
 `enable_ReKernel` 是唯一**同时**出现在两处的开关：它既在主 job 里决定是否把 Re-Kernel 源码编进内核，又通过 `github.event.inputs.enable_ReKernel` 控制第二个 job `upload_rekernel` 是否运行。
+
+**`enable_bbg` 是唯一会改 `security/Kconfig` 的开关**：它先从 `vc-teahouse/Baseband-guard` 拉 `setup.sh` 直接管道进 `bash` 执行，再直写 `CONFIG_BBG=y`，最后用一段**范围式 `sed`** 把 LSM 的 `default` 行补成 `lockdown,baseband_guard`。那段 sed 同时依赖三件事——`^config LSM$` 到 `^help$` 的区间、`default` 行里已存在 `lockdown`、以及 `baseband_guard` 尚未出现——上游 Kconfig 措辞一变就会**静默不生效**，构建不报任何错。
 
 **KPM 已整体移除**（`enable_kpm` 输入、`CONFIG_KPM`、打补丁步骤全删），两个分支都不保留。工作流里任何 `KPM` 字样都是遗漏。
 
@@ -109,6 +111,10 @@ actionlint .github/workflows/*.yml                             # Actions 语义�
 | hide_stuff 补丁 | `raw.githubusercontent.com/cctv18/oppo_oplus_realme_sm8750/...` | 同上（在 SUSFS 步骤内） |
 | Droidspaces kABI 补丁 | `git clone ravindu644/Droidspaces-OSS` → `Documentation/resources/kernel-patches/GKI/` | `ENABLE_DROIDSPACES != 'off'` |
 | ntsync 补丁 ×2 | `raw.githubusercontent.com/Goldzxcbug/Droidspaces_Kernel_patch/.../NTsync/` | 另需 `ENABLE_DROIDSPACES_NTSYNC` |
+| zram lz4 / zstd 补丁 | `git clone cctv18/oppo_oplus_realme_sm8750` → `zram_patch/`（`001-lz4.patch`、`lz4armv8.S`、`002-zstd.patch`） | **无条件**（该步没有 `if:`，与任何开关无关） |
+| BBG 基带守护 | `vc-teahouse/Baseband-guard` 的 `setup.sh`，管道进 `bash` | `ENABLE_BBG` |
+
+**工具链是整套缓存哈希的一部分**：`clang-r510928` 与 `build-tools` 都取自 `cctv18/oneplus_sm8650_toolchain` 的同一个 release，构建时按 `LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- O=out` 编 `Image`。换工具链等于换一套 ccache，不要指望旧缓存还能命中。
 
 两条必须守住的不变量：
 
@@ -186,7 +192,9 @@ actionlint .github/workflows/*.yml                             # Actions 语义�
 - **`repo 变量`可覆盖上游来源**：`BOOT_SIGNER_REPO`、`BOOT_SIGNER_REF`、`BOOT_IMG_REPO`、`BOOT_IMG_TAG`、`PUBLIC_CACHE_REPO`、`PUBLIC_CACHE_TAG` 优先读 `vars.*`，未设置时回退到工作流内默认值。fork 后想换源应改 repository variables，而不是改工作流。
 - **上游来源是 `qdykernel/Build_Lenovo_sm8750`**，本仓库是 `mineextremely/` 的 fork。合并上游时注意：上游把 KSU 供应商叫 `BakaSU`，而 `Baka-SU/BakaSU` 就是 `ReSukiSU` 改名后的**同一个仓库**（旧地址 301 重定向过去），别当成两个项目。
 - **fork 标识被写进内核**：`CONFIG_KSU_FULL_NAME_FORMAT="%TAG_NAME%-%COMMIT_SHA%-GitHub@mineextremely"`。这是 fork 者的水印，非上游原值。
-- **README 需与实现同步**：改工作流文件名或增删输入时，两份 README 的工作流表格和输入参数表都要改。README 中的 Telegram / 酷安 / GitHub 徽章仍指向上游 `qdykernel/`——那是刻意保留的出处标注，不要"顺手统一"成本仓库。
+- **README 需与实现同步**：改工作流文件名、增删输入、改动产物命名或分支差异时，两份 README（`README.md` / `README-en.md`）的对应章节都要改——参数表、版本矩阵、产物表、补丁来源表、分支说明，逐处对齐。两份文件必须一一对应：章节结构一致，行数可以不同但内容要能逐条对上。
+- **README 开头的 fork 警告块是刻意的**：它是读者看到的第一段内容，声明「个人 fork、与上游功能集已分叉、可能含不稳定 feature、刷机风险自负」。删掉它等于把 fork 伪装成上游产物，不要以"文档要精炼"为由砍掉；「与上游的差异」对照表和「分支说明」同理。
+- README 中的 Telegram / 酷安 / GitHub 徽章仍指向上游 `qdykernel/`——那是刻意保留的出处标注，不要"顺手统一"成本仓库。
 - **无 LICENSE 文件**，尽管 README 声明 GPL-3.0。
 
 ## Agent skills
